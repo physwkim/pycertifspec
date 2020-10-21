@@ -17,8 +17,8 @@ import traceback
 
 class Client:
     """
-    Connection to SPEC 
-    
+    Connection to SPEC
+
     You should only need one instance of this class and use it to create Motor, Variable, etc. instances
     """
     def __init__(self, host:str="localhost", port:int=None, port_range:Tuple[int, int]=(6510, 6530), ports:List[int]=[], timeout:float=0.5, log_messages:bool=False):
@@ -123,7 +123,7 @@ class Client:
             prop (string): The name of the property
             callback (function): The function to be called when the event is received. Will also be called immediately after subscribing
             nowait (boolean): By default the function waits for the first event after registering to see if an error occurred. To skip that set True
-            timeout (float): The timeout to wait for a response after subscribing. Function returns False when it runs out 
+            timeout (float): The timeout to wait for a response after subscribing. Function returns False when it runs out
 
         Returns:
             True if successful, False when timeout reached
@@ -138,7 +138,7 @@ class Client:
                     def last_msg_cb(msg):
                         last_msg["msg"] = msg
                         last_msg["event"].set()
-                    
+
                     self._subscribers[prop] = [last_msg_cb]
                     self._subscribers["error"].append(last_msg_cb)
 
@@ -175,7 +175,7 @@ class Client:
             (boolean): True if the callback was removed, False if it didn't exist anyways
         """
         with self._subscribe_lock:
-            if prop in self._subscribers.keys() and callback in self._subscribers[prop]: 
+            if prop in self._subscribers.keys() and callback in self._subscribers[prop]:
                 self._subscribers[prop].remove(callback)
 
                 # Unsubscribe if nothing is listening anymore
@@ -185,7 +185,7 @@ class Client:
                 return True
             return False
 
-    def run(self, console_command:str, blocking:bool=True, callback:Callable[[SpecMessage, str], None]=None) -> Tuple[SpecMessage, str]:
+    def run(self, console_command:str, blocking:bool=True, callback:Callable[[SpecMessage, str], None]=None, setter=False) -> Tuple[SpecMessage, str]:
         """
         Execute a command like from the interactive SPEC console
 
@@ -193,23 +193,24 @@ class Client:
             console_command (string): The command to execute
             blocking (boolean): When True, the function will block until it receives a response from SPEC and return the response
             callback (function): When blocking=False, the response will instead be send to the callback function. Expected to accept 2 positional arguments: data, console_output
-        
+            setter (boolean): When True, the function will send command with body field. Else, the function wiil send command with name field.
+
         Returns:
             Tuple[SpecMessage, str]: If blocking, the response message from the server and what would be printed to console
         """
         event = EventTypes.SV_FUNC_WITH_RETURN if blocking or callback is not None else EventTypes.SV_FUNC
         if console_command[-1] != '\n':
             console_command += '\n'
-        
-        if blocking or callback:
-            res = {"event": threading.Event(), "val": None}
-            def res_cb(msg):
-                if callback:
-                    threading.Thread(target=callback, args=(msg, self._last_console_print)).start()
-                if blocking:
-                    res["val"] = msg
-                    res["event"].set()
-            
+
+        res = {"event": threading.Event(), "val": None}
+        def res_cb(msg):
+            if callback:
+                threading.Thread(target=callback, args=(msg, self._last_console_print)).start()
+            if blocking:
+                res["val"] = msg
+                res["event"].set()
+
+        if setter:
             self._send(event, body=console_command.encode("ascii"), callback=res_cb)
 
             if blocking:
@@ -301,7 +302,7 @@ class Client:
         if val and val.type in DataTypes.ARRAYS:
             return ArrayVar(name, self)
         return Var(name, self, dtype=dtype)
-    
+
     def abort(self):
         """
         Abort all running commands
@@ -319,7 +320,7 @@ class Client:
         motors = []
         ms = self.var("A").value
         for m in ms.keys():
-            motors.append(self.run("motor_mne({})".format(m))[0].body)
+            motors.append(self.run("motor_mne({})".format(m), setter=True)[0].body)
         return motors
 
     @property
@@ -342,8 +343,11 @@ class Client:
         """
         self.counter_names = collections.OrderedDict()
         for i in range(self.var("COUNTERS", dtype=int).value):
-            self.counter_names[self.run("cnt_mne({})".format(i))[0].body] = self.run("cnt_name({})".format(i))[0].body 
-        return self.counter_names      
+            try:
+                self.counter_names[self.run("cnt_mne({})".format(i), setter=True)[0].body] = self.run("cnt_name({})".format(i), setter=True)[0].body
+            except:
+                pass
+        return self.counter_names
 
     def count(self, time:float, callback:Callable=None, refresh_names:bool=False) -> Dict[str, float]:
         """
@@ -365,11 +369,11 @@ class Client:
             countvals[res.name.split("/")[1]] = float(res.body)
             if callback:
                 threading.Thread(target=callback, args=(countvals,)).start()
-        
+
         for counter in self.counter_names.keys():
             self.subscribe("scaler/{}/value".format(counter), count_callback)
 
-        self.run("count {}".format(time))
+        self.run("count {}".format(time), setter=True)
 
         for counter in self.counter_names.keys():
             count_callback(self.get("scaler/{}/value".format(counter))) # Ensure that the final values are read. It says in the docs the callback does it, but it didn't seem reliable

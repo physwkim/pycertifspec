@@ -79,13 +79,14 @@ class Motor(object):
         """The string mnemonic of the motor"""
         self.conn = conn
 
+        def set_and_notify(res):
+            prop = res.name.split('/')[-1]
+            with self._observed_properties_conditions[prop]:
+                setattr(self, "_"+prop, res.body)
+                self._observed_properties_conditions[prop].notify_all()
+
         # Some properties listen to change events instead of polling from the server all the time
         for prop in self._observed_properties:
-            def set_and_notify(res):
-                setattr(self, "_"+prop, res.body)
-                with self._observed_properties_conditions[prop]:
-                    self._observed_properties_conditions[prop].notify_all()
-
             self._observed_properties_cbs.append(set_and_notify)
             self._observed_properties_conditions[prop] = threading.Condition()
             self.subscribe(prop, self._observed_properties_cbs[-1])
@@ -108,8 +109,8 @@ class Motor(object):
 
     def set(self, prop_name:str, value:Any, wait_for_error:float=0):
         """
-        Set a motor property. 
-        
+        Set a motor property.
+
         You shouldn't really have to use this method since most properties automatically broadcast changes to SPEC when modified
 
         Attributes:
@@ -135,30 +136,31 @@ class Motor(object):
     def moveto(self, value:float, blocking:bool=True, callback:Callable=None):
         """
         Move motor to position
-        
+
         Arguments:
             value (float): The position to move to
             blocking (boolean): Wait for move to finish before returning
             callback (Callable): If blocking=False, this function will be called on completion
         """
         #self.set("start_one", new_pos) # Doesn't work because SPEC is adding in some random string for some reason
-        res = self.conn.run("{get_angles;A["+self.name+"]="+str(value)+";move_em;}\n", blocking=blocking)
+        # KSW res = self.conn.run("{get_angles;A["+self.name+"]="+str(value)+";move_em;}\n", blocking=blocking, callback=callback)
+        res = self.conn.run("{get_angles;A["+self.name+"]="+str(value)+";move_em;}\n", blocking=blocking, setter=True)
         if res and res[0].err != 0:
             raise Exception(res[1])
 
         # Apparently the moving returns before it is actually finished
         if blocking:
-            self._move_done = self.get("move_done").body # Force refresh move_done
             # Wait till its True
             with self._observed_properties_conditions["move_done"]:
+                self._observed_properties_conditions["move_done"].wait()
                 while not self.move_done:
                     self._observed_properties_conditions["move_done"].wait()
-        
-        elif callback:
+
+        if callback:
             def wait_for_finish():
-                self._move_done = self.get("move_done").body # Force refresh move_done
                 # Wait till its True
                 with self._observed_properties_conditions["move_done"]:
+                    self._observed_properties_conditions["move_done"].wait()
                     while not self.move_done:
                         self._observed_properties_conditions["move_done"].wait()
                 callback()
@@ -167,7 +169,7 @@ class Motor(object):
     def move(self, value:float, blocking:bool=True, callback:Callable=None):
         """
         Move motor relative to current position
-        
+
         Arguments:
             value (float): The distance to move
             blocking (boolean): Wait for move to finish before returning
@@ -175,7 +177,7 @@ class Motor(object):
         """
         new_pos = self.position + value
         self.moveto(new_pos, blocking=blocking, callback=callback)
-     
+
     def subscribe(self, prop:str, callback:Callable, nowait:bool=False, timeout:float=1.0) -> bool:
         """
         Subscribe to changes in a motor property.
@@ -184,7 +186,7 @@ class Motor(object):
             prop (string): The property to listen to
             callback (function): The function to be called when the event is received
             nowait (boolean): By default the function waits for the first event after registering to see if an error occurred. To skip that set True
-            timeout (float): The timeout to wait for a response after subscribing. Function returns False when it runs out 
+            timeout (float): The timeout to wait for a response after subscribing. Function returns False when it runs out
 
         Returns:
             True if successful, False when an error occurred or timeout reached
