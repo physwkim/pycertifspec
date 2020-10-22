@@ -1,76 +1,96 @@
-from ophyd.status import Status
+from collections import OrderedDict
+import time as tm
+
+from ophyd.device import Device
+from ophyd.signal import Signal
+from ophyd.status import MoveStatus
+from ophyd.device import Component as Cpt
+from ophyd.positioner import PositionerBase
+from ophyd.utils  import ReadOnlyError
 try:
     from pycertifspec import Motor as SPECMotor
 except:
     SPECMotor = object
-from collections import OrderedDict
-import time as tm
 
-class Motor:
+class _ReadbackSignal(Signal):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._metadata.update(
+            connected=True,
+            write_access=False,
+        )
+
+    def get(self, **kwargs):
+        self._readback = self.parent.position
+        return self._readback
+
+    def describe(self):
+        res = super().describe()
+        return res
+
+    @property
+    def timestamp(self):
+        '''Timestamp of the readback value'''
+        return tm.time()
+
+    def put(self, value, *, timestamp=None, force=False):
+        raise ReadOnlyError("The signal {} is readonly.".format(self.name))
+
+    def set(self, value, *, timestamp=None, force=False):
+        raise ReadOnlyError("The signal {} is readonly.".format(self.name))
+
+
+class _SetpointSignal(Signal):
+    def put(self, value, *, timestamp=None, force=False):
+        self._readback = value
+        self.parent.set(float(value))
+
+    def get(self):
+        return self._readback
+
+    def describe(self):
+        res = super().describe()
+        return res
+
+    @property
+    def timestamp(self):
+        '''Timestamp of the readback value'''
+        return tm.time()
+
+class Motor(Device, PositionerBase):
     """
     Class representing a SPEC motor that can be used with bluesky
     """
-    
-    def __init__(self, motor):
+
+    readback = Cpt(_ReadbackSignal, value=0, kind='hinted')
+
+    SUB_READBACK = 'readback'
+    _default_sub = SUB_READBACK
+
+    def __init__(self, motor, delay=0, precision=3, egu='', *args, **kwargs):
         """
         Create a bluesky motor from a SPEC motor
 
         Parameters:
             motor (pycertifspec.Motor): A pycertifspec motor
         """
+
         if isinstance(motor, SPECMotor):
             self.motor = motor
         else:
             raise ValueError("Motor not pycertifspec.Motor")
 
         self.name = self.motor.name
-        self.parent = None
-        self.hints = {'fields': ['{}_position'.format(self.name)]}
 
-    def read(self):
-        return OrderedDict([
-            ('{}_position'.format(self.name), {'value': self.motor.position, 'timestamp': tm.time()}),
-            ('{}_dial_position'.format(self.name), {'value': self.motor.dial_position, 'timestamp': tm.time()}),
-        ])
-    
-    def describe(self):
-        return OrderedDict([
-            ('{}_position'.format(self.name), {'source': "motor/{}/position".format(self.motor.name), 'dtype': "number", 'shape': []}),
-            ('{}_dial_position'.format(self.name), {'source': "motor/{}/dial_position".format(self.motor.name), 'dtype': "number", 'shape': []}),
-        ])
-    
-    def trigger(self):
-        status = Status()
-        status.set_finished()
-        return status
+        super(Motor, self).__init__(*args, name=self.name, **kwargs)
+        self.delay = delay
+        self.precision = precision
+        self.readback.name = self.name
+        self.motor.add_callback(self._pos_changed)
+        self._egu = egu
 
-    def read_configuration(self):
-        return OrderedDict([
-            ('offset', {'value': self.motor.offset, 'timestamp': tm.time()}),
-            ('step_size', {'value': self.motor.step_size, 'timestamp': tm.time()}),
-            ('sign', {'value': self.motor.sign, 'timestamp': tm.time()}),
-        ])
-
-    def describe_configuration(self):
-        return OrderedDict([
-            ('offset', {'source': "motor/{}/offset".format(self.motor.name), 'dtype': "number", 'shape': []}),
-            ('step_size', {'source': "motor/{}/step_size".format(self.motor.name), 'dtype': "number", 'shape': []}),
-            ('sign', {'source': "motor/{}/sign".format(self.motor.name), 'dtype': "number", 'shape': []}),
-        ])
-
-    def configure(self, offset:float=None):
-        """
-        Configure settings for the motor
-
-        Parameters:
-            offset (number): Set by what amount the reported position should deviate from the measured
-        """
-        before = self.read_configuration
-
-        if offset is not None:
-            self.motor.offset = offset
-
-        return (before, self.read_configuration)
+        # position initialize
+        self._pos_changed()
 
     def stop(self, *args, **kwargs):
         """
@@ -78,12 +98,31 @@ class Motor:
         """
         if not self.motor.move_done:
             self.motor.conn.abort()
-    
+
     def set(self, position):
-        self.status = Status()
+        self.status = MoveStatus(self, position)
         self.motor.moveto(position, blocking=False, callback=self.status.set_finished)
+
         return self.status
 
     @property
+    def moving(self):
+        '''Whether or not the motor is moving
+
+        Returns
+        -------
+        moving : bool
+        '''
+        return not self.motor.move_done
+
+    @property
     def position(self):
-        return self.motor.position
+        return self._position
+
+    def _pos_changed(self):
+        self._set_position(self.motor.position)
+
+    @property
+    def egu(self):
+        '''The engineering units (EGU) for a position'''
+        return self._egu

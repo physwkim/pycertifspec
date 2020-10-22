@@ -1,6 +1,7 @@
 import threading
 from .SpecSocket import SpecMessage
 from typing import Any, Callable
+import numpy as np
 
 class MotorProperty:
     def __init__(self, name, readonly=False, dtype=str):
@@ -70,7 +71,7 @@ class Motor(object):
     backlash = MotorProperty("backlash", dtype=float)
     """backlash"""
 
-    _observed_properties = ["position", "dial_position", "move_done"]
+    _observed_properties = ["position", "move_done"]
     _observed_properties_conditions = {}
     _observed_properties_cbs = []
 
@@ -78,11 +79,13 @@ class Motor(object):
         self.name = mne
         """The string mnemonic of the motor"""
         self.conn = conn
+        self.callbacks = {}
 
         def set_and_notify(res):
             prop = res.name.split('/')[-1]
             with self._observed_properties_conditions[prop]:
                 setattr(self, "_"+prop, res.body)
+                self.run_callbacks()
                 self._observed_properties_conditions[prop].notify_all()
 
         # Some properties listen to change events instead of polling from the server all the time
@@ -90,6 +93,38 @@ class Motor(object):
             self._observed_properties_cbs.append(set_and_notify)
             self._observed_properties_conditions[prop] = threading.Condition()
             self.subscribe(prop, self._observed_properties_cbs[-1])
+
+    def run_callbacks(self):
+        """run callbacks
+        """
+        for index in sorted(list(self.callbacks.keys())):
+            self.run_callback(index)
+
+    def run_callback(self, index):
+        try:
+            fcn, kwargs = self.callbacks[index]
+        except KeyError:
+            return
+
+        fcn(**kwargs)
+
+    def add_callback(self, callback=None, index=None, run_now=False, **kw):
+        """add a callback
+        """
+        if callable(callback):
+            if index is None:
+                index = 1
+                if len(self.callbacks) > 0:
+                    index = 1 + max(self.callbacks.keys())
+            self.callbacks[index] = (callback, kw)
+
+            if run_now:
+                self.run_callback(index)
+
+            return index
+
+        else:
+            return None
 
     def __del__(self):
         for i, prop in enumerate(self._observed_properties):
@@ -142,8 +177,10 @@ class Motor(object):
             blocking (boolean): Wait for move to finish before returning
             callback (Callable): If blocking=False, this function will be called on completion
         """
-        #self.set("start_one", new_pos) # Doesn't work because SPEC is adding in some random string for some reason
-        # KSW res = self.conn.run("{get_angles;A["+self.name+"]="+str(value)+";move_em;}\n", blocking=blocking, callback=callback)
+
+        if np.isclose(self.position, value):
+            callback()
+
         res = self.conn.run("{get_angles;A["+self.name+"]="+str(value)+";move_em;}\n", blocking=blocking, setter=True)
         if res and res[0].err != 0:
             raise Exception(res[1])
