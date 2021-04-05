@@ -63,11 +63,15 @@ class Client:
         self.subscribe("output/tty", self._console_listener)
 
     def _console_listener(self, msg):
-        if msg.body.endswith("> \n"):
+        string = msg.body
+        if not isinstance(string, str):
+            string = msg.body.decode()
+
+        if string.endswith("> \n"):
             self._last_console_print = "".join(self._console_print_lines)
             self._console_print_lines = []
         else:
-            self._console_print_lines.append(msg.body)
+            self._console_print_lines.append(string)
 
     def _listener_thread(self):
         while True:
@@ -148,8 +152,10 @@ class Client:
                         del self._subscribers[prop]
                         return False
                     if last_msg["msg"].cmd == EventTypes.SV_EVENT and last_msg["msg"].name == "error": # The last message was an error => subscribing didn't work
-                        del self._subscribers[prop]
-                        raise SpecError(last_msg["msg"].body)
+                        body = last_msg["msg"].body.decode()
+                        if not body.startswith("No error"):
+                            del self._subscribers[prop]
+                            raise SpecError(last_msg["msg"].body)
 
                     threading.Thread(target=callback, args=(last_msg["msg"],)).start() # Forward the function to the callback since it was successful
                     self._subscribers[prop] = [callback]
