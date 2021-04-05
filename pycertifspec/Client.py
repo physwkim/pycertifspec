@@ -334,7 +334,7 @@ class Client:
         motors = collections.OrderedDict()
         ms = self.var("A").value
         for m in ms.keys():
-            motors[self.run("motor_mne({})".format(m))[0].body] = self.run("motor_name({})".format(m))[0].body
+            motors[self.run("motor_mne({})".format(m), setter=True)[0].body] = self.run("motor_name({})".format(m), setter=True)[0].body
         return motors
 
     def _get_counter_names(self) -> 'OrderedDict[str, str]':
