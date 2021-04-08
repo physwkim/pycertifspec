@@ -181,7 +181,7 @@ class Motor(object):
         if np.isclose(self.position, value):
             callback()
 
-        res = self.conn.run("{get_angles;A["+self.name+"]="+str(value)+";move_em;}\n", blocking=blocking, setter=True)
+        res = self.conn.run("{get_angles;A["+self.name+"]="+str(value)+";move_em;}\n", blocking=blocking)
         if res and res[0].err != 0:
             raise Exception(res[1])
 

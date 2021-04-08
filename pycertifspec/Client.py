@@ -199,7 +199,6 @@ class Client:
             console_command (string): The command to execute
             blocking (boolean): When True, the function will block until it receives a response from SPEC and return the response
             callback (function): When blocking=False, the response will instead be send to the callback function. Expected to accept 2 positional arguments: data, console_output
-            setter (boolean): When True, the function will send command with body field. Else, the function wiil send command with name field.
 
         Returns:
             Tuple[SpecMessage, str]: If blocking, the response message from the server and what would be printed to console
@@ -323,7 +322,7 @@ class Client:
         motors = []
         ms = self.var("A").value
         for m in ms.keys():
-            motors.append(self.run("motor_mne({})".format(m), setter=True)[0].body)
+            motors.append(self.run("motor_mne({})".format(m))[0].body)
         return motors
 
     @property
@@ -337,7 +336,7 @@ class Client:
         motors = collections.OrderedDict()
         ms = self.var("A").value
         for m in ms.keys():
-            motors[self.run("motor_mne({})".format(m), setter=True)[0].body] = self.run("motor_name({})".format(m), setter=True)[0].body
+            motors[self.run("motor_mne({})".format(m))[0].body] = self.run("motor_name({})".format(m))[0].body
         return motors
 
     def _get_counter_names(self) -> 'OrderedDict[str, str]':
@@ -347,7 +346,7 @@ class Client:
         self.counter_names = collections.OrderedDict()
         for i in range(self.var("COUNTERS", dtype=int).value):
             try:
-                self.counter_names[self.run("cnt_mne({})".format(i), setter=True)[0].body] = self.run("cnt_name({})".format(i), setter=True)[0].body
+                self.counter_names[self.run("cnt_mne({})".format(i))[0].body] = self.run("cnt_name({})".format(i))[0].body
             except:
                 pass
         return self.counter_names
@@ -376,7 +375,7 @@ class Client:
         for counter in self.counter_names.keys():
             self.subscribe("scaler/{}/value".format(counter), count_callback)
 
-        self.run("count {}".format(time), setter=True)
+        self.run("count {}".format(time))
 
         for counter in self.counter_names.keys():
             count_callback(self.get("scaler/{}/value".format(counter))) # Ensure that the final values are read. It says in the docs the callback does it, but it didn't seem reliable
