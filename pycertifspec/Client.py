@@ -191,7 +191,7 @@ class Client:
                 return True
             return False
 
-    def run(self, console_command:str, blocking:bool=True, callback:Callable[[SpecMessage, str], None]=None, setter=False) -> Tuple[SpecMessage, str]:
+    def run(self, console_command:str, blocking:bool=True, callback:Callable[[SpecMessage, str], None]=None) -> Tuple[SpecMessage, str]:
         """
         Execute a command like from the interactive SPEC console
 
@@ -216,14 +216,11 @@ class Client:
                 res["val"] = msg
                 res["event"].set()
 
-        if setter:
-            self._send(event, body=console_command.encode("ascii"), callback=res_cb)
+        self._send(event, body=console_command.encode("ascii"), callback=res_cb)
 
-            if blocking:
-                res["event"].wait()
-                return res["val"], self._last_console_print
-        else:
-            self._send(event, property_name=console_command)
+        if blocking:
+            res["event"].wait()
+            return res["val"], self._last_console_print
 
     def set(self, prop:str, value:Any, wait_for_error:float=0.2):
         """
